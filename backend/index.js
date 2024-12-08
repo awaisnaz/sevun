@@ -2,201 +2,100 @@ import express from 'express';
 import cors from "cors";
 import "dotenv/config.js";
 import mongoose from 'mongoose';
-import passport from 'passport';
-import { Strategy as LocalStrategy } from 'passport-local';
-import bcrypt from 'bcryptjs';
-import session from 'express-session';
-import Anthropic from "@anthropic-ai/sdk";
 import MongoStore from 'connect-mongo';
+import axios from "axios";
+import Sentiment from "sentiment";
+const sentiment = new Sentiment();
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+const apiKey = process.env.GOOGLE_MAPS_API;
+// const placeId = 'ChIJc-kz1FKN3zgRktDQiSB3pqs&cb=80440353';
 
 const app = express();
 
 // Connect to MongoDB
 mongoose.connect(process.env.MONGODB_URL, { useNewUrlParser: true, useUnifiedTopology: true });
 
-// User model
-const UserSchema = new mongoose.Schema({
-  email: String,
-  password: String
+// Reviews model
+const ReviewsSchema = new mongoose.Schema({
+  placeId: String,
+  reviewId: Number,
+  name: String,
+  review: String,
+  sentiment: Number
 });
-const User = mongoose.model('User', UserSchema);
+const Reviews = mongoose.model('Reviews', ReviewsSchema);
 
-// Define the schema for the Job model
-const jobSchema = new mongoose.Schema({
-    timestamp: Date,
-    companyName: String,
-    title: String,
-    description: String
-  });  
-const Job = mongoose.model('Job', jobSchema);
 
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(session({
-  secret: process.env.PASSWORD_HASH,
-  saveUninitialized: false,
-  resave: true,
-  cookie: { secure: false },
-  secure: false,
-  store: MongoStore.create({
-    mongoUrl: process.env.MONGODB_URL,
-    collectionName: 'sessions' // This is optional
-  }),
-}));
-app.use(passport.initialize());
-app.use(passport.session());
-app.use(cors({credentials: true, origin: ['http://localhost:5173', 'http://localhost:3000/login']}));
+// app.use(cors({credentials: true, origin: ['http://localhost:5173', 'http://localhost:3000/login']}));
+app.use(cors());
 
-// Passport local strategy
-passport.use(new LocalStrategy({ usernameField: 'email' },
-  async (email, password, done) => {
-    try {
-      const user = await User.findOne({ email });
-      if (!user) {
-        return done(null, false, { message: 'Incorrect email.' });
+app.post("/saveReviews", async (req, res, next) => {
+  // getting post body
+  let placeId = req.body.placeId;
+  
+  // Check if Reviews are already populated. If so, then don't store again.
+  const document = await Reviews.findOne({ ["placeId"]: placeId });
+  if (document != null) {
+    res.status(201).json({ message: 'Reviews already exist.' });
+    next();
+  }
+  else {
+    // Construct the URL for the Places API with reviews
+    const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=review&key=${apiKey}`;
+
+    // Make the request to the API
+    const response = await axios.get(url);
+    
+    if (response.data.status === 'OK') {
+      const reviews = response.data.result.reviews;
+      // console.log("reviews: ", reviews);
+      
+      // Get the latest 40 reviews (or fewer if not available)
+      const latestReviews = reviews.slice(0, 40);
+
+      for (let i = 0; i < latestReviews.length; i++) {
+
+        let review = latestReviews[i];
+        let sent = sentiment.analyze(review.text).score
+        const reviews = new Reviews({ 
+          placeId: placeId,
+          reviewId: i + 1,
+          name: review.author_name,
+          review: review.text,
+          sentiment: sent
+        });
+        await reviews.save();
       }
-      const isMatch = await bcrypt.compare(password, user.password);
-      if (isMatch) {
-        return done(null, user);
-      } else {
-        return done(null, false, { message: 'Incorrect password.' });
-      }
-    } catch (err) {
-      return done(err);
+      res.status(201).json({ message: 'Reviews gotten successfully.' });
+      next();
+    } else {
+      console.error('Error fetching reviews:', response.data.status);
     }
   }
-));
-
-passport.serializeUser((user, done) => {
-  done(null, user.id);
 });
 
-passport.deserializeUser(async (id, done) => {
-  try {
-    const user = await User.findById(id);
-    done(null, user);
-  } catch (err) {
-    done(err);
-  }
-});
-
-// Routes
-app.post('/register', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const user = new User({ email, password: hashedPassword });
-    await user.save();
-    res.status(201).json({ message: 'User registered successfully' });
-  } catch (error) {
-    res.status(500).json({ message: 'Error registering user' });
-  }
-});
-
-app.post('/login', passport.authenticate('local'), (req, res) => {
-    // res.redirect("/");
-    res.json({ message: 'Logged in successfully' });
-});
-
-app.get('/logout', (req, res) => {
-  req.logout((err) => {
-    if (err) {
-      return res.status(500).json({ message: 'Error logging out' });
+app.post("/getReviews", async (req, res, next) => {
+  // get the reviews
+  let reviews = await Reviews.find();
+  // console.log("document: ", document);
+  if (reviews != null) {
+    // console.log("Reviews already exist. Exiting without updating.");
+    let temp = [];
+    for (let i = 0; i < reviews.length; i++) {
+      let temp2 = reviews[i];
+      let temp3 = {};
+      temp3.name = temp2.name;
+      temp3.review = temp2.review;
+      temp3.sentiment = temp2.sentiment;
+      temp.push(temp3);
     }
-    res.json({ message: 'Logged out successfully' });
-  });
-});
-
-// Protected route example
-app.get('/profile', (req, res) => {
-  if (req.isAuthenticated()) {
-    res.json({ user: req.user });
-  } else {
-    res.status(401).json({ message: 'Unauthorized' });
-  }
-});
-
-app.get('/checkAuth', async (req, res) => {
-  let temp = await req.isAuthenticated();
-  if (req.user) {
-    res.json({ isAuthenticated: true, user: req.user });
-  } else {
-    res.json({ isAuthenticated: false });
-  }
-});
-
-app.post('/jobs', async (req, res) => {
-  try {
-    const jobs = await Job.find({})
-      .sort({ timestamp: -1 })
-      .skip((req.body.page - 1) * 10)
-      .limit(10);
-    const count = await Job.countDocuments();
-    res.json({
-        jobs: jobs,
-        total: count
-    });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-app.post('/addJob', async (req, res) => {
-  try {
-    const job = new Job({
-      timestamp: new Date().toISOString(),
-      companyName: req.body.company,
-      title: req.body.title,
-      description: req.body.description
-     });
-    await job.save();
-    res.status(201).json({ message: 'Job Added successfully' });
-  } catch (error) {
-    res.status(500).json({ message: 'Job Add Error' });
-    console.log(error);
-  }
-});
-
-app.post('/genJob', async (req, res) => {
-  const systemPrompt = `You are an AI assistant specialized in improving job titles and creating concise job descriptions. 
-  When given an input job title and description, you will generate a concise 100-word job description that accurately reflects the role.
-  
-  Make the Job Description as a paragraph of numbered points of requirements, and preferences.
-
-  Return the response a json in the following format (fill in the title and description):
-  {"title": [title], "description": "description"}
-
-  The JSON Format should be parsable. You need to escape your escapes :) Use double \\ instead of \
-  `;  
-  
-  const userPrompt = `Input Job Title: ${req.body.title}
-  Input Job Description: ${req.body.description}
-  
-  Please provide the corrected job title and a 100-word description.`;
-
-  try {
-    let response = await anthropic.messages.create({
-      model: "claude-3-haiku-20240307", // "claude-3-opus-20240229", // 
-      max_tokens: 1024,
-      temperature: 0.7,
-      system: systemPrompt,
-      messages: [
-        { role: "user", content: userPrompt }
-      ]
-    });
-
-    response = JSON.parse(JSON.parse(JSON.stringify(response.content[0].text)));
-    res.status(201).json({ 
-      response
-    });
-  } catch (error) {
-    console.error('Error calling Anthropic API:', error);
-    throw error;
+    reviews = temp;
+    // console.log("temp: ", temp);
+    res.status(201).json({ reviews });
+    next();
   }
 });
 

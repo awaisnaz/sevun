@@ -1,7 +1,7 @@
 import {useState, useEffect} from "react";
 import { Form, Input, Button, Card, Alert } from 'antd';
 
-const Logout = () => {
+const Register = () => {
   const [form] = Form.useForm();
 
   let [message, setMessage] = useState(null);
@@ -9,16 +9,19 @@ const Logout = () => {
 
   const onFinish = (values) => {
     (async () => {
-      const response = await fetch('http://localhost:3000/logout', {
-        method: 'GET',
-        credentials: 'include'
+      const response = await fetch('http://localhost:3000/saveReviews', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(values)
       });
       if (response.ok) {
-        setMessage("Logout successful!");
+        setMessage("Registration successful!");
         setMessageType("success");
       }
       else {
-        setMessage("Logout failed!");
+        setMessage("Registration failed!");
         setMessageType("error");
       }
       const content = await response.json();
@@ -30,16 +33,29 @@ const Logout = () => {
       <Card className="w-full max-w-md mx-auto">
         <Form
           form={form}
-          name="login"
+          name="register"
           onFinish={onFinish}
           layout="vertical"
           className="space-y-4"
         >
-          <h2 className="text-2xl font-semibold mb-6">Logout</h2>
+          <h2 className="text-2xl font-semibold mb-6">Register Google Place</h2>
+
+          <Form.Item
+            name="placeId"
+            label="Place ID"
+            rules={[
+              {
+                required: true,
+                message: 'Please input the Place ID!',
+              },
+            ]}
+          >
+            <Input />
+          </Form.Item>
 
           <Form.Item>
             <Button type="primary" htmlType="submit" className="w-full">
-              Logout
+              Register
             </Button>
           </Form.Item>
 
@@ -55,4 +71,4 @@ const Logout = () => {
   );
 };
 
-export default Logout;
+export default Register;

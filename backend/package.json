@@ -11,6 +11,7 @@
   "license": "ISC",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.3",
+    "axios": "^1.7.9",
     "bcryptjs": "^2.4.3",
     "body-parser": "^1.20.3",
     "connect-mongo": "^5.1.0",
@@ -21,6 +22,7 @@
     "mongodb": "^6.9.0",
     "mongoose": "^8.6.3",
     "passport": "^0.7.0",
-    "passport-local": "^1.0.0"
+    "passport-local": "^1.0.0",
+    "sentiment": "^5.0.2"
   }
 }
